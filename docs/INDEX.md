@@ -90,16 +90,16 @@ Explains how developers can contribute to the project.
 
 | Document | Status |
 |----------|--------|
-| README | 🟡 Draft |
-| VISION | 🟡 Draft |
-| PROJECT_PRINCIPLES | 🟡 Draft |
-| ARCHITECTURE | 🟡 Draft |
-| DATABASE | 🟡 Draft |
-| RANKING | ⚪ Planned |
-| UI | ⚪ Planned |
-| DATA_SOURCES | ⚪ Planned |
-| ROADMAP | ⚪ Planned |
-| CONTRIBUTING | ⚪ Planned |
+| README | ✅ Approved |
+| VISION | ✅ Approved |
+| PROJECT_PRINCIPLES | ✅ Approved |
+| ARCHITECTURE | ✅ Approved |
+| DATABASE | ✅ Approved |
+| RANKING | ✅ Approved |
+| UI | ✅ Approved |
+| DATA_SOURCES | ✅ Approved |
+| ROADMAP | ✅ Approved |
+| CONTRIBUTING | ✅ Approved |
 
 ---
 
