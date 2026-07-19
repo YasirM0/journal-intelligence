@@ -6,6 +6,8 @@ Journal Intelligence is an open-source platform that helps researchers identify 
 
 The project is designed to support researchers in making informed submission decisions without relying on opaque recommendation systems or paid AI services.
 
+We believe journal recommendations should be transparent, inspectable, and grounded in verifiable evidence.
+
 ## Principles
 
 ### Transparency
@@ -63,3 +65,11 @@ Deferred to future versions:
 ## Long-Term Vision
 
 Journal Intelligence aims to become a trusted open-source reference tool for journal selection by prioritizing transparency, reproducibility, and practical usefulness over complexity.
+
+---
+
+**Document Version:** 0.1
+
+**Last Updated:** July 2026
+
+**Status:** Draft
