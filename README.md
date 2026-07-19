@@ -2,9 +2,9 @@
 
 > Researchers deserve recommendations they can understand and trust.
 
-An open-source journal recommendation platform that explains **why** each journal is recommended—not just which journals are recommended.
+**Most journal finders tell you which journals match your paper. Journal Intelligence tells you *why* they match.**
 
-Journal Intelligence combines semantic search, transparent ranking, and practical publishing information to help researchers make informed submission decisions.
+Journal Intelligence is an open-source journal recommendation platform that combines semantic search, transparent ranking, and practical publishing information to help researchers make informed submission decisions.
 
 ## Overview
 
@@ -15,6 +15,20 @@ Journal Intelligence aims to provide an open, transparent, and community-driven 
 Rather than asking "Which journal is the best?", Journal Intelligence helps answer:
 
 > "Which journal is the best choice for **my research and my publishing goals**?"
+
+---
+
+## Project Status
+
+Journal Intelligence is currently in active development.
+
+Current milestone:
+
+Sprint 1 — Application Skeleton
+
+Version:
+
+v0.1.0-alpha
 
 ---
 
@@ -83,6 +97,12 @@ The architecture remains modular so components can be replaced without redesigni
 🚧 Sprint 0 — Documentation
 
 The project is currently defining its architecture and specifications before implementation begins.
+
+---
+
+## Documentation
+
+See docs/INDEX.md for the complete documentation.
 
 ---
 
