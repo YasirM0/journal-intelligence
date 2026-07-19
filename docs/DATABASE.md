@@ -150,3 +150,11 @@ Version 0.1 stores only the metadata required for:
 - Displaying journal information
 
 Additional fields will be introduced only when they support a concrete feature.
+
+---
+
+**Document Version:** 0.1
+
+**Last Updated:** July 2026
+
+**Status:** Approved

@@ -18,20 +18,6 @@ Rather than asking "Which journal is the best?", Journal Intelligence helps answ
 
 ---
 
-## Project Status
-
-Journal Intelligence is currently in active development.
-
-Current milestone:
-
-Sprint 1 — Application Skeleton
-
-Version:
-
-v0.1.0-alpha
-
----
-
 ## Version 0.1 Goals
 
 Version 0.1 focuses on doing one thing exceptionally well:
@@ -94,9 +80,15 @@ The architecture remains modular so components can be replaced without redesigni
 
 ## Project Status
 
-🚧 Sprint 0 — Documentation
+Journal Intelligence is currently in active development.
 
-The project is currently defining its architecture and specifications before implementation begins.
+Current milestone:
+
+Sprint 1 — Application Skeleton
+
+Version:
+
+v0.1.0-alpha
 
 ---
 

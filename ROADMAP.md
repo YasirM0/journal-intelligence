@@ -86,4 +86,4 @@ New features should improve researcher experience without reducing transparency 
 
 **Last Updated:** July 2026
 
-**Status:** Draft
+**Status:** Approved

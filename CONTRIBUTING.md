@@ -86,4 +86,4 @@ Thank you for helping improve Journal Intelligence.
 
 **Last Updated:** July 2026
 
-**Status:** Draft
+**Status:** Approved
