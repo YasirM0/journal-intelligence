@@ -58,23 +58,17 @@ Defines the journal data model and explains what information the system stores.
 
 Explains how journal recommendations are calculated and how ranking remains transparent.
 
-*(Planned)*
-
 ---
 
 ## UI.md
 
 Defines the user experience, including Simple Mode and Advanced Mode.
 
-*(Planned)*
-
 ---
 
 ## DATA_SOURCES.md
 
 Lists the public sources used to collect journal metadata and explains their intended use.
-
-*(Planned)*
 
 ---
 
@@ -132,4 +126,4 @@ Following this order provides both the motivation behind the project and the tec
 
 **Last Updated:** July 2026
 
-**Status:** Draft
+**Status:** Approved

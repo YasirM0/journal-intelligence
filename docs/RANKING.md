@@ -111,7 +111,7 @@ Preference scoring should refine—not replace—semantic similarity.
 
 # Stage 4: Final Ranking
 
-Journals are sorted according to their overall score.
+Journals are sorted according to their Overall Match.
 
 Higher-ranked journals should represent the best balance between topical fit and user preferences.
 
@@ -199,4 +199,4 @@ The system intentionally favors reliability and interpretability over sophistica
 
 **Last Updated:** July 2026
 
-**Status:** Draft
+**Status:** Approved

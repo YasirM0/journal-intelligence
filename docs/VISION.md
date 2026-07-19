@@ -72,4 +72,4 @@ Journal Intelligence aims to become a trusted open-source reference tool for jou
 
 **Last Updated:** July 2026
 
-**Status:** Approved
+**Status:** 
