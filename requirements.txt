@@ -1,0 +1,4 @@
+# Journal Intelligence dependencies
+#
+# Dependencies will be added as implementation progresses.
+# Version 0.1 follows a minimal dependency philosophy.
