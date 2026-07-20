@@ -3,87 +3,131 @@ import streamlit as st
 st.set_page_config(
     page_title="Journal Intelligence",
     page_icon="📚",
+    layout="centered",
 )
-
-st.title("📚 Journal Intelligence")
-
-st.write(
-    "Find the right journal at every stage of your research journey."
-)
-
-st.divider()
-
-st.header("How would you like to begin?")
-
-st.write(
-    "Choose the workflow that best matches your current stage of research."
-)
-
-col1, col2 = st.columns(2)
 
 # ==========================================================
-# Planning Workflow
+# Header
 # ==========================================================
 
-with col1:
+header_left, header_right = st.columns([8, 1])
 
-    st.subheader("🌱 Planning")
+with header_left:
+    st.title("📚 Journal Intelligence")
+
+with header_right:
+    st.selectbox(
+        label="Language",
+        options=["English"],
+        index=0,
+        disabled=True,
+        label_visibility="collapsed",
+        help="Multi-language support is planned for a future release.",
+    )
+
+st.write("### Find the right journal.")
+st.write("Learn the publication process.")
+st.write("Publish with confidence.")
+
+st.write("")
+
+# ==========================================================
+# Workflow Selection
+# ==========================================================
+
+st.header("Choose your workflow")
+
+st.write(
+    "Select the workflow that best matches your current stage of research."
+)
+
+# ----------------------------------------------------------
+# Planning
+# ----------------------------------------------------------
+
+with st.container(border=True):
+
+    left, right = st.columns([6, 2])
+
+    with left:
+        st.subheader("🌱 Planning")
+
+    with right:
+        st.caption("🚧 Coming Soon")
 
     st.write(
-        "I'm still planning or writing my manuscript and want to identify "
-        "suitable journals before I start writing."
+        "Still planning or writing your manuscript?\n\n"
+        "Discover suitable journals before you begin writing so you can "
+        "align your manuscript with the right audience, scope, and author "
+        "guidelines from the start."
     )
 
     if st.button(
         "🌱 Start Planning",
         use_container_width=True,
     ):
-        st.warning(
-            "🚧 The Planning Workflow is currently under development."
+
+        st.info(
+            "The Planning workflow is currently under development."
         )
 
-        st.markdown(
-            """
+        st.markdown("""
 ### Planned Features
 
-- ✅ Discover suitable journals before writing
-- ✅ Download journal templates
-- ✅ View author guidelines
-- ✅ Explore journal scope and aims
-- ✅ Receive journal-specific writing recommendations
+- Discover suitable journals before writing
+- Download journal templates
+- Browse author guidelines
+- Explore journal aims and scope
+- Receive journal-specific writing recommendations
+""")
 
-*These features will be implemented in future versions.*
-"""
-        )
+# ----------------------------------------------------------
+# Submission
+# ----------------------------------------------------------
 
-# ==========================================================
-# Submission Workflow
-# ==========================================================
-
-with col2:
+with st.container(border=True):
 
     st.subheader("🚀 Submission")
 
     st.write(
-        "I already have a completed manuscript and want to find the most "
-        "suitable journal for publication."
+        "Already have a completed manuscript?\n\n"
+        "Analyze your title, abstract, and keywords to discover journals "
+        "that best match your research."
     )
 
     if st.button(
-        "🚀 Submission Search",
+        "🚀 Start Submission Search",
         use_container_width=True,
     ):
         st.switch_page("pages/1_Submission_Search.py")
 
+st.write("")
+
+# ==========================================================
+# Publication Academy
+# ==========================================================
+
+st.header("🎓 Need a quick refresher?")
+
+st.write(
+    "Whether you're publishing your first paper or exploring a new indexing "
+    "system, Publication Academy explains important publishing concepts in "
+    "clear, practical language."
+)
+
+if st.button(
+    "🎓 Explore Publication Academy",
+    use_container_width=True,
+):
+    st.switch_page("pages/2_Publication_Academy.py")
+
+st.info(
+    "💡 Publishing terms such as APC, Scopus, SINTA, Quartiles, Open Access, "
+    "and Peer Review will be explained throughout the application."
+)
+
 st.divider()
 
 st.caption(
-    "Journal Intelligence is designed to support researchers throughout the "
-    "publication journey—from selecting a target journal before writing to "
-    "identifying the best publication venue for a completed manuscript."
-)
-
-st.markdown(
-    "<p style='text-align:center; color:gray;'><em>Supporting researchers from idea to publication.</em></p>",
-    unsafe_allow_html=True,
+    "🔒 Privacy-first • No account required • Built for researchers"
 )
