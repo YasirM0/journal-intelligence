@@ -18,14 +18,8 @@ st.markdown(
     """
 )
 
-st.sidebar.header("Navigation")
+st.sidebar.header("Journal Intelligence")
 
-navigation_items = [
-    "Home",
-    "Search",
-    "About",
-    "Settings",
-]
-
-for item in navigation_items:
-    st.sidebar.write(f"• {item}")
+st.sidebar.info(
+    "Use the navigation above to explore the application."
+)
