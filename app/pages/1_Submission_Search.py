@@ -7,8 +7,8 @@ from services.filtering import filter_journals
 from services.export import export_to_csv
 from datetime import datetime
 
-if "results" not in st.session_state:
-    st.session_state.results = None
+if "search" not in st.session_state:
+    st.session_state.search = None
 
 # ==========================================================
 # Page Configuration
@@ -237,16 +237,23 @@ if st.button(
         journals=results,
         indexing=ranking_indexing,
         language=ranking_language,
-)
+    )
     
     results = rank_journals(
         journals=results,
-)
+    )
 
     # Show only the best recommendations.
     results = results[:10]
-    st.session_state.results = results
-    st.session_state.strategy = recommendation_strategy
+    st.session_state.search = {
+        "results": results,
+        "strategy": recommendation_strategy,
+        "filters": {
+            "indexing": preferred_indexing,
+            "language": preferred_language,
+            "budget": publication_budget,
+        },
+    }
 
     if not results:
         st.info(
@@ -266,17 +273,24 @@ if st.button(
 # Recommendation Results
 # ==========================================================
 
-results = st.session_state.results
+search = st.session_state.search
 
-if results:
+if search:
+
+    results = search["results"]
+    strategy = search["strategy"]
 
     st.success(
         f"Showing the top {len(results)} recommended journals."
     )
 
+    if st.button("🗑️ Clear Search"):
+        st.session_state.search = None
+        st.rerun()
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
 
-    strategy_slug = st.session_state.strategy.split(" ", 1)[1]
+    strategy_slug = strategy.split(" ", 1)[1]
     strategy_slug = (
         strategy_slug
         .replace(" (Recommended)", "")
@@ -295,6 +309,11 @@ if results:
         data=csv_data,
         file_name=filename,
         mime="text/csv",
+    )
+    
+    st.caption(
+        "🔒 Search results are stored only for this browser session "
+        "and are never saved permanently."
     )
 
     for recommendation in results:
