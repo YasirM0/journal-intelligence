@@ -4,7 +4,11 @@ from utils.database import load_journals
 from services.matching import match_journals
 from services.ranking import rank_journals
 from services.filtering import filter_journals
+from services.export import export_to_csv
+from datetime import datetime
 
+if "results" not in st.session_state:
+    st.session_state.results = None
 
 # ==========================================================
 # Page Configuration
@@ -219,7 +223,7 @@ if st.button(
         journals=journals,
     )
 
-        # Remove journals with zero similarity
+    # Remove journals with zero similarity
     results = results[results["match_score"] > 0]
 
     # Convert UI selections
@@ -236,11 +240,13 @@ if st.button(
 )
     
     results = rank_journals(
-    journals=results,
+        journals=results,
 )
 
     # Show only the best recommendations.
     results = results[:10]
+    st.session_state.results = results
+    st.session_state.strategy = recommendation_strategy
 
     if not results:
         st.info(
@@ -256,13 +262,40 @@ if st.button(
         )
         st.stop()
 
+# ==========================================================
+# Recommendation Results
+# ==========================================================
+
+results = st.session_state.results
+
+if results:
+
     st.success(
         f"Showing the top {len(results)} recommended journals."
     )
 
-# ------------------------------------------------------
-# Recommendation Results
-# ------------------------------------------------------
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+    strategy_slug = st.session_state.strategy.split(" ", 1)[1]
+    strategy_slug = (
+        strategy_slug
+        .replace(" (Recommended)", "")
+        .replace(" ", "_")
+        .lower()
+    )
+
+    filename = (
+        f"ji_{strategy_slug}_{timestamp}.csv"
+    )
+
+    csv_data = export_to_csv(results)
+
+    st.download_button(
+        label="📥 Download Recommendations (CSV)",
+        data=csv_data,
+        file_name=filename,
+        mime="text/csv",
+    )
 
     for recommendation in results:
 
@@ -279,15 +312,17 @@ if st.button(
                 )
 
             with col2:
-                st.write(f"**Indexing:** {recommendation.indexing} ({recommendation.journal_rank})"
-)
+                st.write(
+                    f"**Indexing:** {recommendation.indexing} ({recommendation.journal_rank})"
+                )
 
             with col3:
                 st.write(f"**Language:** {recommendation.language}")
 
             st.write(f"**APC:** {recommendation.apc_display}")
             st.write(f"**Publisher:** {recommendation.publisher}")
+
             st.link_button(
-               "Visit Journal",
-               recommendation.submission_url,
-)
+                "Visit Journal",
+                recommendation.submission_url,
+            )
