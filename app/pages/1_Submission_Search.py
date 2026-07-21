@@ -1,5 +1,15 @@
 import streamlit as st
 
+from utils.database import load_journals
+
+journals = load_journals()
+
+with st.expander("Developer Preview"):
+
+    st.success(f"Loaded {len(journals)} journals.")
+
+    st.dataframe(journals)
+
 st.set_page_config(
     page_title="Submission Search",
     page_icon="🔍",
