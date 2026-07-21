@@ -2,17 +2,41 @@ import streamlit as st
 
 from utils.database import load_journals
 from services.matching import match_journals
+from services.ranking import rank_journals
+
+
+# ==========================================================
+# Page Configuration
+# ==========================================================
 
 st.set_page_config(
     page_title="Submission Search",
     page_icon="🔍",
 )
 
+
+# ==========================================================
+# Load Journal Dataset
+# ==========================================================
+# The dataset is loaded once when the page starts.
+# Later this can be cached using @st.cache_data.
+
 journals = load_journals()
 
+
+# Developer preview (temporary)
 with st.expander("Developer Preview"):
     st.success(f"Loaded {len(journals)} journals.")
-    st.dataframe(journals, use_container_width=True, hide_index=True)
+    st.dataframe(
+        journals,
+        width="stretch",
+        hide_index=True,
+    )
+
+
+# ==========================================================
+# Page Header
+# ==========================================================
 
 st.title("🔍 Journal Search")
 
@@ -23,8 +47,9 @@ st.write(
 
 st.divider()
 
+
 # ==========================================================
-# Upload Manuscript
+# Upload Manuscript (Future Feature)
 # ==========================================================
 
 st.subheader("📎 Upload Manuscript (Recommended)")
@@ -53,8 +78,9 @@ st.markdown(
 
 st.divider()
 
+
 # ==========================================================
-# Manual Entry
+# Manual Manuscript Entry
 # ==========================================================
 
 st.subheader("📄 Enter Manuscript Information")
@@ -79,75 +105,111 @@ keywords = st.text_input(
 
 st.divider()
 
+
 # ==========================================================
 # Publication Preferences
 # ==========================================================
 
 st.caption(
-    "Customize your search by specifying publication preferences."
+    "Customize how Journal Intelligence recommends journals for your manuscript."
 )
 
 with st.expander("⚙️ Publication Preferences", expanded=False):
 
-    st.markdown("#### Journal Indexing")
+    # ------------------------------------------------------
+    # Recommendation Strategy
+    # Determines HOW journals are ranked after matching.
+    # ------------------------------------------------------
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.checkbox("Scopus", value=True)
-        st.checkbox("SINTA", value=True)
-        st.checkbox("DOAJ")
-
-    with col2:
-        st.checkbox("Web of Science")
-        st.checkbox("Google Scholar")
-
-    st.divider()
-
-    st.markdown("#### Maximum APC")
-
-    st.selectbox(
-        "Publication Budget",
+    recommendation_strategy = st.selectbox(
+        "Recommendation Strategy",
         [
-            "Any",
-            "Free (No APC)",
-            "Budget",
-            "Standard",
-            "Premium",
+            "⚖️ Balanced (Recommended)",
+            "🎯 Best Match",
+            "💰 Lowest APC",
+            "🏆 Highest Prestige",
+            "⚡ Fast Publication (Coming Soon)",
+            "🌱 Beginner Friendly (Coming Soon)",
         ],
         help=(
-            "Budget ranges will automatically adapt to the selected "
-            "journal indexing in a future version."
+            "Choose what Journal Intelligence should prioritize when "
+            "ranking journals."
         ),
     )
 
     st.divider()
 
-    st.markdown("#### Language")
+    # ------------------------------------------------------
+    # Filters
+    # These determine WHICH journals are eligible.
+    # ------------------------------------------------------
 
-    st.selectbox(
-        "Preferred Language",
+    st.markdown("#### Filters")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        preferred_indexing = st.multiselect(
+            "Preferred Indexing",
+            [
+                "Scopus",
+                "SINTA",
+                "DOAJ",
+                "Web of Science",
+                "Google Scholar",
+            ],
+            default=["Scopus", "SINTA"],
+            help="Only prioritize journals from the selected indexing systems.",
+        )
+
+    with col2:
+
+        preferred_language = st.selectbox(
+            "Preferred Language",
+            [
+                "Any",
+                "English",
+                "Indonesian",
+            ],
+        )
+
+    publication_budget = st.selectbox(
+        "Publication Budget",
         [
             "Any",
-            "English",
-            "Indonesian",
+            "Free (No APC)",
+            "Low APC (< $100)",
+            "Medium APC ($100–300)",
+            "High APC (> $300)",
         ],
+        help="Maximum publication fee you are willing to pay.",
     )
 
 st.divider()
 
+
 # ==========================================================
-# Search
+# Journal Recommendation
 # ==========================================================
 
 if st.button(
     "🔍 Find Best Matching Journals",
-    use_container_width=True,
+    width="stretch",
 ):
+
+    # ------------------------------------------------------
+    # Validate required fields
+    # ------------------------------------------------------
 
     if not title or not abstract:
         st.warning("Please enter both a title and an abstract.")
         st.stop()
+
+    # ------------------------------------------------------
+    # Step 1
+    # Find journals that are textually similar to the manuscript.
+    # ------------------------------------------------------
 
     results = match_journals(
         title=title,
@@ -156,18 +218,40 @@ if st.button(
         journals=journals,
     )
 
-    # Keep only relevant journals
+    # Remove journals with zero similarity
     results = results[results["match_score"] > 0]
 
-    # Show only the top 10 matches
+    # Convert "Any" into None so the ranking service ignores it.
+    ranking_indexing = preferred_indexing or []
+    ranking_language = None if preferred_language == "Any" else preferred_language
+
+
+    # ------------------------------------------------------
+    # Step 2
+    # Apply publication preferences to create the final ranking.
+    # ------------------------------------------------------
+
+    results = rank_journals(
+        journals=results,
+        preferred_indexing=ranking_indexing,
+        preferred_language=ranking_language,
+    )
+
+    # Show only the best recommendations.
     results = results.head(10)
 
-    st.success(f"Showing the top {len(results)} matching journals.")
+    st.success(
+        f"Showing the top {len(results)} recommended journals."
+    )
+
+    # ------------------------------------------------------
+    # Prepare results for display.
+    # ------------------------------------------------------
 
     display_results = results[
         [
             "journal_name",
-            "match_score",
+            "final_score",
             "indexing",
             "journal_rank",
             "apc_amount",
@@ -175,7 +259,7 @@ if st.button(
     ].rename(
         columns={
             "journal_name": "Journal",
-            "match_score": "Match (%)",
+            "final_score": "Recommendation Score",
             "indexing": "Indexing",
             "journal_rank": "Rank",
             "apc_amount": "APC",
@@ -184,6 +268,6 @@ if st.button(
 
     st.dataframe(
         display_results,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
