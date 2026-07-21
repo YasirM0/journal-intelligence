@@ -1,10 +1,24 @@
+"""
+Database utilities.
+
+Responsible for loading the journal dataset used by Journal Intelligence.
+"""
+
 from pathlib import Path
 
 import pandas as pd
 
 
-DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "journals.csv"
+# ==========================================================
+# Dataset Location
+# ==========================================================
 
+DATA_FILE = Path(__file__).parent.parent / "data" / "journals.csv"
+
+
+# ==========================================================
+# Load Journal Dataset
+# ==========================================================
 
 def load_journals() -> pd.DataFrame:
     """

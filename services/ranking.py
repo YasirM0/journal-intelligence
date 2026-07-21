@@ -1,7 +1,8 @@
+from models.recommendation import Recommendation
+
+
 def rank_journals(
     journals,
-    preferred_indexing=None,
-    preferred_language=None,
 ):
     """
     Rank journals after textual matching.
@@ -23,8 +24,8 @@ def rank_journals(
 
     Returns
     -------
-    pandas.DataFrame
-        Journals sorted by recommendation score.
+    list[Recommendation]
+        Ranked journal recommendations.
     """
 
     results = journals.copy()
@@ -32,23 +33,29 @@ def rank_journals(
     # Start with textual similarity.
     results["final_score"] = results["match_score"]
 
-    # Bonus for preferred indexing.
-    if preferred_indexing:
-
-        results.loc[
-            results["indexing"].isin(preferred_indexing),
-            "final_score",
-        ] += 5
-
-    # Bonus for preferred language.
-    if preferred_language:
-
-        results.loc[
-            results["language"] == preferred_language,
-            "final_score",
-        ] += 3
-
-    return results.sort_values(
+    results = results.sort_values(
         by="final_score",
         ascending=False,
     )
+
+    recommendations = []
+
+    for _, row in results.iterrows():
+
+        recommendations.append(
+            Recommendation(
+                journal_name=row["journal_name"],
+                publisher=row["publisher"],
+                indexing=row["indexing"],
+                journal_rank=row["journal_rank"],
+                language=row["language"],
+                submission_url=row["submission_url"],
+                apc_display=f'{row["apc_currency"]} {row["apc_amount"]}',
+                apc_value=row["apc_amount"],
+                recommendation_score=row["final_score"],
+                match_score=row["match_score"],
+                reasons=[],
+            )
+        )
+
+    return recommendations

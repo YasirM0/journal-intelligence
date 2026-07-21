@@ -3,6 +3,7 @@ import streamlit as st
 from utils.database import load_journals
 from services.matching import match_journals
 from services.ranking import rank_journals
+from services.filtering import filter_journals
 
 
 # ==========================================================
@@ -218,56 +219,75 @@ if st.button(
         journals=journals,
     )
 
-    # Remove journals with zero similarity
+        # Remove journals with zero similarity
     results = results[results["match_score"] > 0]
 
-    # Convert "Any" into None so the ranking service ignores it.
+    # Convert UI selections
     ranking_indexing = preferred_indexing or []
-    ranking_language = None if preferred_language == "Any" else preferred_language
-
-
-    # ------------------------------------------------------
-    # Step 2
-    # Apply publication preferences to create the final ranking.
-    # ------------------------------------------------------
-
-    results = rank_journals(
-        journals=results,
-        preferred_indexing=ranking_indexing,
-        preferred_language=ranking_language,
+    ranking_language = (
+        None if preferred_language == "Any"
+        else preferred_language
     )
 
+    results = filter_journals(
+        journals=results,
+        indexing=ranking_indexing,
+        language=ranking_language,
+)
+    
+    results = rank_journals(
+    journals=results,
+)
+
     # Show only the best recommendations.
-    results = results.head(10)
+    results = results[:10]
+
+    if not results:
+        st.info(
+            """
+    ### No journals matched your current filters.
+
+    Try one or more of the following:
+
+    - Select additional indexing systems.
+    - Choose **Any** as the preferred language.
+    - Broaden your manuscript title, abstract, or keywords.
+    """
+        )
+        st.stop()
 
     st.success(
         f"Showing the top {len(results)} recommended journals."
     )
 
-    # ------------------------------------------------------
-    # Prepare results for display.
-    # ------------------------------------------------------
+# ------------------------------------------------------
+# Recommendation Results
+# ------------------------------------------------------
 
-    display_results = results[
-        [
-            "journal_name",
-            "final_score",
-            "indexing",
-            "journal_rank",
-            "apc_amount",
-        ]
-    ].rename(
-        columns={
-            "journal_name": "Journal",
-            "final_score": "Recommendation Score",
-            "indexing": "Indexing",
-            "journal_rank": "Rank",
-            "apc_amount": "APC",
-        }
-    )
+    for recommendation in results:
 
-    st.dataframe(
-        display_results,
-        width="stretch",
-        hide_index=True,
-    )
+        with st.container(border=True):
+
+            st.subheader(recommendation.journal_name)
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric(
+                    "Recommendation Score",
+                    f"{recommendation.recommendation_score:.1f}",
+                )
+
+            with col2:
+                st.write(f"**Indexing:** {recommendation.indexing} ({recommendation.journal_rank})"
+)
+
+            with col3:
+                st.write(f"**Language:** {recommendation.language}")
+
+            st.write(f"**APC:** {recommendation.apc_display}")
+            st.write(f"**Publisher:** {recommendation.publisher}")
+            st.link_button(
+               "Visit Journal",
+               recommendation.submission_url,
+)
