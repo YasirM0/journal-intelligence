@@ -1,19 +1,18 @@
 import streamlit as st
 
 from utils.database import load_journals
-
-journals = load_journals()
-
-with st.expander("Developer Preview"):
-
-    st.success(f"Loaded {len(journals)} journals.")
-
-    st.dataframe(journals)
+from services.matching import match_journals
 
 st.set_page_config(
     page_title="Submission Search",
     page_icon="🔍",
 )
+
+journals = load_journals()
+
+with st.expander("Developer Preview"):
+    st.success(f"Loaded {len(journals)} journals.")
+    st.dataframe(journals, use_container_width=True, hide_index=True)
 
 st.title("🔍 Journal Search")
 
@@ -145,6 +144,46 @@ if st.button(
     "🔍 Find Best Matching Journals",
     use_container_width=True,
 ):
-    st.info(
-        "🚧 Journal search functionality will be implemented in a future issue."
+
+    if not title or not abstract:
+        st.warning("Please enter both a title and an abstract.")
+        st.stop()
+
+    results = match_journals(
+        title=title,
+        abstract=abstract,
+        keywords=keywords,
+        journals=journals,
+    )
+
+    # Keep only relevant journals
+    results = results[results["match_score"] > 0]
+
+    # Show only the top 10 matches
+    results = results.head(10)
+
+    st.success(f"Showing the top {len(results)} matching journals.")
+
+    display_results = results[
+        [
+            "journal_name",
+            "match_score",
+            "indexing",
+            "journal_rank",
+            "apc_amount",
+        ]
+    ].rename(
+        columns={
+            "journal_name": "Journal",
+            "match_score": "Match (%)",
+            "indexing": "Indexing",
+            "journal_rank": "Rank",
+            "apc_amount": "APC",
+        }
+    )
+
+    st.dataframe(
+        display_results,
+        use_container_width=True,
+        hide_index=True,
     )
