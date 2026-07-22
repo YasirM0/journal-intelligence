@@ -1,5 +1,10 @@
 # Models
 
-This directory stores machine learning models, embeddings, and related assets used by Journal Intelligence.
+This package contains the core domain models used throughout Journal Intelligence.
 
-Version 0.1 does not yet include any model files.
+## Current Models
+
+- `Journal` — Canonical representation of a journal.
+- `Recommendation` — Recommendation result returned to users.
+
+All external data sources (DOAJ, SINTA, Scopus, etc.) are transformed into the `Journal` model before being stored in the database.

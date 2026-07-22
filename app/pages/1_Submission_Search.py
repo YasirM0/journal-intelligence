@@ -1,347 +1,217 @@
 import streamlit as st
 
-from utils.database import load_journals
-from services.matching import match_journals
-from services.ranking import rank_journals
-from services.filtering import filter_journals
+from services.recommender import JournalRecommender, STRATEGIES
 from services.export import export_to_csv
-from datetime import datetime
-
-if "search" not in st.session_state:
-    st.session_state.search = None
-
-# ==========================================================
-# Page Configuration
-# ==========================================================
 
 st.set_page_config(
     page_title="Submission Search",
     page_icon="🔍",
 )
 
+st.title("🔍 Submission Search")
+
+st.write(
+    "Enter your manuscript information to receive journal recommendations."
+)
 
 # ==========================================================
-# Load Journal Dataset
+# Upload Manuscript
 # ==========================================================
-# The dataset is loaded once when the page starts.
-# Later this can be cached using @st.cache_data.
 
-journals = load_journals()
+with st.expander("📄 Upload manuscript (optional)"):
 
-
-# Developer preview (temporary)
-with st.expander("Developer Preview"):
-    st.success(f"Loaded {len(journals)} journals.")
-    st.dataframe(
-        journals,
-        width="stretch",
-        hide_index=True,
+    uploaded_file = st.file_uploader(
+        "Upload a PDF or DOCX file",
+        type=["pdf", "docx"],
     )
 
+    if uploaded_file is not None:
+        st.info(
+            "Automatic extraction of title/abstract/keywords from uploaded "
+            "files isn't built yet — please fill in the fields below "
+            "manually for now."
+        )
 
 # ==========================================================
-# Page Header
+# Manual Entry
 # ==========================================================
-
-st.title("🔍 Journal Search")
-
-st.write(
-    "Upload your completed manuscript or enter its information manually "
-    "to discover journals that best match your research."
-)
-
-st.divider()
-
-
-# ==========================================================
-# Upload Manuscript (Future Feature)
-# ==========================================================
-
-st.subheader("📎 Upload Manuscript (Recommended)")
-
-st.write(
-    "If you already have a completed manuscript, you will soon be able "
-    "to upload it and automatically extract the title, abstract, and keywords."
-)
-
-st.file_uploader(
-    "Upload PDF or DOCX",
-    type=["pdf", "docx"],
-    disabled=True,
-)
-
-st.caption(
-    "🚧 Automatic manuscript extraction will be available in a future version."
-)
-
-st.divider()
-
-st.markdown(
-    "<div style='text-align:center; font-weight:bold; color:gray;'>OR</div>",
-    unsafe_allow_html=True,
-)
-
-st.divider()
-
-
-# ==========================================================
-# Manual Manuscript Entry
-# ==========================================================
-
-st.subheader("📄 Enter Manuscript Information")
 
 title = st.text_input(
-    "Paper Title *",
-    placeholder="Enter your manuscript title...",
+    "Paper Title",
 )
 
 abstract = st.text_area(
-    "Abstract *",
-    placeholder="Paste your manuscript abstract here...",
-    height=220,
-    help="Your abstract is the primary source used to identify suitable journals.",
+    "Abstract",
+    height=200,
 )
 
 keywords = st.text_input(
-    "Keywords (Optional)",
+    "Keywords (comma separated)",
     placeholder="digital governance, e-government, Indonesia",
-    help="Separate keywords using commas (,) or semicolons (;).",
 )
 
 st.divider()
-
 
 # ==========================================================
 # Publication Preferences
 # ==========================================================
 
-st.caption(
-    "Customize how Journal Intelligence recommends journals for your manuscript."
-)
+st.subheader("Publication Preferences")
 
-with st.expander("⚙️ Publication Preferences", expanded=False):
+pref_col1, pref_col2, pref_col3 = st.columns(3)
 
-    # ------------------------------------------------------
-    # Recommendation Strategy
-    # Determines HOW journals are ranked after matching.
-    # ------------------------------------------------------
-
-    recommendation_strategy = st.selectbox(
+with pref_col1:
+    # Real strategies first, plus roadmap items shown but marked "Coming soon"
+    # rather than silently faked with made-up scores.
+    strategy_options = STRATEGIES + [
+        "Best Match (Coming soon)",
+        "Highest Prestige (Coming soon)",
+        "Beginner Friendly (Coming soon)",
+    ]
+    strategy = st.selectbox(
         "Recommendation Strategy",
-        [
-            "⚖️ Balanced (Recommended)",
-            "🎯 Best Match",
-            "💰 Lowest APC",
-            "🏆 Highest Prestige",
-            "⚡ Fast Publication (Coming Soon)",
-            "🌱 Beginner Friendly (Coming Soon)",
-        ],
+        strategy_options,
+        index=0,
         help=(
-            "Choose what Journal Intelligence should prioritize when "
-            "ranking journals."
+            "Best Match, Highest Prestige, and Beginner Friendly need data "
+            "(semantic similarity, journal rank, acceptance rate) that "
+            "isn't in the database yet."
         ),
     )
 
-    st.divider()
+with pref_col2:
+    language_choice = st.selectbox(
+        "Preferred Language",
+        ["Any", "English", "Indonesian"],
+        index=0,
+    )
 
-    # ------------------------------------------------------
-    # Filters
-    # These determine WHICH journals are eligible.
-    # ------------------------------------------------------
-
-    st.markdown("#### Filters")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        preferred_indexing = st.multiselect(
-            "Preferred Indexing",
-            [
-                "Scopus",
-                "SINTA",
-                "DOAJ",
-                "Web of Science",
-                "Google Scholar",
-            ],
-            default=["Scopus", "SINTA"],
-            help="Only prioritize journals from the selected indexing systems.",
-        )
-
-    with col2:
-
-        preferred_language = st.selectbox(
-            "Preferred Language",
-            [
-                "Any",
-                "English",
-                "Indonesian",
-            ],
-        )
-
-    publication_budget = st.selectbox(
+with pref_col3:
+    budget_choice = st.selectbox(
         "Publication Budget",
-        [
-            "Any",
-            "Free (No APC)",
-            "Low APC (< $100)",
-            "Medium APC ($100–300)",
-            "High APC (> $300)",
-        ],
-        help="Maximum publication fee you are willing to pay.",
+        ["Any", "Free", "<$100", "$100–300", ">$300"],
+        index=0,
+    )
+
+with st.expander("ℹ️ About these filters"):
+    st.caption(
+        "Language filtering uses each journal's listed languages. "
+        "Budget filtering uses each journal's listed APC — where a fee "
+        "applies but no USD figure could be confirmed, that journal is "
+        "left out of budget-limited searches rather than guessed at. "
+        "Indexing filters (Scopus, SINTA, Web of Science) aren't available "
+        "yet — this database is sourced from DOAJ, so all listed journals "
+        "are DOAJ-indexed by definition, but other indexes aren't tracked."
     )
 
 st.divider()
 
-
 # ==========================================================
-# Journal Recommendation
+# Search
 # ==========================================================
 
 if st.button(
-    "🔍 Find Best Matching Journals",
-    width="stretch",
+    "🔍 Find Journals",
+    use_container_width=True,
 ):
 
-    # ------------------------------------------------------
-    # Validate required fields
-    # ------------------------------------------------------
-
-    if not title or not abstract:
-        st.warning("Please enter both a title and an abstract.")
+    if not title:
+        st.warning("Please enter a paper title.")
         st.stop()
 
-    # ------------------------------------------------------
-    # Step 1
-    # Find journals that are textually similar to the manuscript.
-    # ------------------------------------------------------
+    keyword_list = [
+        k.strip()
+        for k in keywords.replace(";", ",").split(",")
+        if k.strip()
+    ]
 
-    results = match_journals(
+    language = None if language_choice == "Any" else language_choice
+
+    free_only = budget_choice == "Free"
+    min_budget = None
+    max_budget = None
+    if budget_choice == "<$100":
+        max_budget = 99.99
+    elif budget_choice == "$100–300":
+        min_budget, max_budget = 100, 300
+    elif budget_choice == ">$300":
+        min_budget = 300
+
+    resolved_strategy = strategy if strategy in STRATEGIES else "Balanced"
+    if strategy not in STRATEGIES:
+        st.info(f'"{strategy.split(" (")[0]}" isn\'t available yet — showing Balanced results instead.')
+
+    recommender = JournalRecommender()
+
+    results = recommender.recommend(
         title=title,
+        keywords=keyword_list,
         abstract=abstract,
-        keywords=keywords,
-        journals=journals,
+        language=language,
+        free_only=free_only,
+        min_budget=min_budget,
+        max_budget=max_budget,
+        strategy=resolved_strategy,
     )
 
-    # Remove journals with zero similarity
-    results = results[results["match_score"] > 0]
+    st.session_state.results = results
 
-    # Convert UI selections
-    ranking_indexing = preferred_indexing or []
-    ranking_language = (
-        None if preferred_language == "Any"
-        else preferred_language
-    )
-
-    results = filter_journals(
-        journals=results,
-        indexing=ranking_indexing,
-        language=ranking_language,
-    )
-    
-    results = rank_journals(
-        journals=results,
-    )
-
-    # Show only the best recommendations.
-    results = results[:10]
-    st.session_state.search = {
-        "results": results,
-        "strategy": recommendation_strategy,
-        "filters": {
-            "indexing": preferred_indexing,
-            "language": preferred_language,
-            "budget": publication_budget,
-        },
-    }
-
-    if not results:
-        st.info(
-            """
-    ### No journals matched your current filters.
-
-    Try one or more of the following:
-
-    - Select additional indexing systems.
-    - Choose **Any** as the preferred language.
-    - Broaden your manuscript title, abstract, or keywords.
-    """
-        )
-        st.stop()
 
 # ==========================================================
 # Recommendation Results
 # ==========================================================
 
-search = st.session_state.search
+if "results" in st.session_state:
 
-if search:
+    results = st.session_state.results
 
-    results = search["results"]
-    strategy = search["strategy"]
+    st.success(f"Found {len(results)} journal recommendations.")
 
-    st.success(
-        f"Showing the top {len(results)} recommended journals."
-    )
+    if results:
+        csv_bytes = export_to_csv(results)
+        st.download_button(
+            "⬇️ Export as CSV",
+            data=csv_bytes,
+            file_name="journal_recommendations.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
-    if st.button("🗑️ Clear Search"):
-        st.session_state.search = None
-        st.rerun()
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-
-    strategy_slug = strategy.split(" ", 1)[1]
-    strategy_slug = (
-        strategy_slug
-        .replace(" (Recommended)", "")
-        .replace(" ", "_")
-        .lower()
-    )
-
-    filename = (
-        f"ji_{strategy_slug}_{timestamp}.csv"
-    )
-
-    csv_data = export_to_csv(results)
-
-    st.download_button(
-        label="📥 Download Recommendations (CSV)",
-        data=csv_data,
-        file_name=filename,
-        mime="text/csv",
-    )
-    
-    st.caption(
-        "🔒 Search results are stored only for this browser session "
-        "and are never saved permanently."
-    )
-
-    for recommendation in results:
+    for journal in results:
 
         with st.container(border=True):
 
-            st.subheader(recommendation.journal_name)
+            st.subheader(journal["title"])
 
-            col1, col2, col3 = st.columns(3)
+            info_col1, info_col2 = st.columns(2)
 
-            with col1:
-                st.metric(
-                    "Recommendation Score",
-                    f"{recommendation.recommendation_score:.1f}",
+            with info_col1:
+                st.write(f"**Publisher:** {journal['publisher']}")
+                st.write(f"**Country:** {journal['country']}")
+                st.write(f"**Language(s):** {journal['languages']}")
+
+            with info_col2:
+                apc_label = "Free" if journal["is_free"] else (
+                    f"~${journal['apc_amount']:.0f}"
+                    if journal["apc_amount"] is not None
+                    else "Paid (amount not confirmed in USD)"
+                )
+                st.write(f"**APC:** {apc_label}")
+                st.write(f"**License:** {journal['license'] or 'Not listed'}")
+                if journal["review_weeks"] is not None:
+                    st.write(f"**Typical review time:** ~{journal['review_weeks']} weeks")
+
+            st.write(f"**Score:** {journal['score']}")
+
+            if journal["website"]:
+                st.link_button(
+                    "Visit Journal",
+                    journal["website"],
                 )
 
-            with col2:
-                st.write(
-                    f"**Indexing:** {recommendation.indexing} ({recommendation.journal_rank})"
-                )
+            if journal["reasons"]:
 
-            with col3:
-                st.write(f"**Language:** {recommendation.language}")
+                st.write("**Why this journal?**")
 
-            st.write(f"**APC:** {recommendation.apc_display}")
-            st.write(f"**Publisher:** {recommendation.publisher}")
-
-            st.link_button(
-                "Visit Journal",
-                recommendation.submission_url,
-            )
+                for reason in journal["reasons"]:
+                    st.write(f"- {reason}")
