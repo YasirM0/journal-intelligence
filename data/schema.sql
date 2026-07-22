@@ -4,29 +4,30 @@ CREATE TABLE journals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
     title TEXT NOT NULL,
+
     publisher TEXT,
+    country TEXT,
+
+    website TEXT,
+    doaj_url TEXT,
 
     issn_print TEXT,
     issn_online TEXT,
 
-    country TEXT,
-    language TEXT,
+    subjects TEXT,
+    keywords TEXT,
+    languages TEXT,
 
-    discipline TEXT,
-    subdiscipline TEXT,
+    apc TEXT,
+    apc_amount REAL,
+    waiver_policy TEXT,
 
-    indexing TEXT,
-    quartile TEXT,
+    review_process TEXT,
+    review_weeks INTEGER,
 
-    apc REAL,
-    apc_currency TEXT,
+    license TEXT,
 
-    open_access BOOLEAN,
+    article_count INTEGER,
 
-    website TEXT,
-    submission_url TEXT,
-
-    match_keywords TEXT,
-
-    last_updated TEXT
+    source TEXT
 );
