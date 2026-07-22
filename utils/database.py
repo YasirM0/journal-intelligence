@@ -4,16 +4,9 @@ Database utilities.
 Responsible for loading the journal dataset used by Journal Intelligence.
 """
 
-from pathlib import Path
-
 import pandas as pd
 
-
-# ==========================================================
-# Dataset Location
-# ==========================================================
-
-DATA_FILE = Path(__file__).parent.parent / "data" / "journals.csv"
+from services.repository import get_all_journals
 
 
 # ==========================================================
@@ -29,4 +22,4 @@ def load_journals() -> pd.DataFrame:
     pandas.DataFrame
         DataFrame containing all journals.
     """
-    return pd.read_csv(DATA_FILE)
+    return get_all_journals()
