@@ -13,10 +13,10 @@ def match_journals(title, abstract, keywords, journals):
 
     # Combine each journal's searchable text
     journal_texts = (
-        journals["scope"].fillna("")
-        + " "
-        + journals["keywords"].fillna("")
-    )
+    journals["discipline"].fillna("")
+    + " "
+    + journals["match_keywords"].fillna("")
+   )
 
     # Build a list containing the user's text followed by every journal
     documents = [user_text] + journal_texts.tolist()

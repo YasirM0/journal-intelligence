@@ -44,14 +44,14 @@ def rank_journals(
 
         recommendations.append(
             Recommendation(
-                journal_name=row["journal_name"],
+                journal_name=row["title"],
                 publisher=row["publisher"],
                 indexing=row["indexing"],
-                journal_rank=row["journal_rank"],
+                journal_rank=row["quartile"],
                 language=row["language"],
                 submission_url=row["submission_url"],
-                apc_display=f'{row["apc_currency"]} {row["apc_amount"]}',
-                apc_value=row["apc_amount"],
+                apc_display=f'{row["apc_currency"]} {row["apc"]}',
+                apc_value=row["apc"],
                 recommendation_score=row["final_score"],
                 match_score=row["match_score"],
                 reasons=[],
