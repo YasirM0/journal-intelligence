@@ -2,7 +2,7 @@
 Journal domain model.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
@@ -12,15 +12,22 @@ class Journal:
 
     All importers convert external data into this model before
     it is validated and stored in the database.
+
+    `source_details` holds one entry per confirmed index (DOAJ, Scopus,
+    Web of Science, SINTA, ...), each with whatever metadata is specific
+    to that source (Scopus/WoS quartile & SJR, SINTA accreditation, ...).
+    `.sources` is a convenience property returning just the source names.
     """
 
-    title: str
+    id: int | None = None
+
+    title: str = ""
 
     publisher: str | None = None
     country: str | None = None
 
     website: str | None = None
-    doaj_url: str |None = None
+    doaj_url: str | None = None
 
     issn_print: str | None = None
     issn_online: str | None = None
@@ -41,30 +48,67 @@ class Journal:
     article_count: int | None = None
 
     source: str | None = None
+    # Full detail per confirmed source, e.g.
+    # [{"source": "Scopus", "quartile": "Q1", "sjr": 1.2, "h_index": 40, "accreditation": None}, ...]
+    source_details: list[dict] = field(default_factory=list)
+
+    @property
+    def sources(self):
+        """Plain list of confirmed source names, e.g. ["DOAJ", "Scopus"]."""
+        return [detail["source"] for detail in self.source_details]
+
+    @staticmethod
+    def _clean(value):
+        """
+        pandas represents SQL NULL as NaN for some columns depending on
+        the query shape, not just None. NaN is truthy in Python (`nan or
+        ""` returns `nan`, not `""`), which breaks any `field or default`
+        pattern downstream — so it's normalized to None right here, once,
+        rather than requiring every caller to remember to check for it.
+        """
+        if isinstance(value, float) and value != value:  # NaN != NaN
+            return None
+        return value
 
     @classmethod
-    def from_row(cls, row):
+    def from_row(cls, row, source_details=None):
         """
         Create a Journal from a database row.
+
+        `source_details` (optional) is the list of confirmed indexing
+        sources (with metadata) for this journal, looked up separately
+        from journal_sources. Falls back to a single-entry list built
+        from row["source"] if not provided.
         """
 
+        clean = cls._clean
+
+        if source_details is None:
+            source_details = (
+                [{"source": clean(row["source"]), "quartile": None, "sjr": None,
+                  "h_index": None, "accreditation": None}]
+                if clean(row["source"]) else []
+            )
+
         return cls(
-            title=row["title"],
-            publisher=row["publisher"],
-            country=row["country"],
-            website=row["website"],
-            doaj_url=row["doaj_url"],
-            issn_print=row["issn_print"],
-            issn_online=row["issn_online"],
-            subjects=row["subjects"],
-            keywords=row["keywords"],
-            languages=row["languages"],
-            apc=row["apc"],
-            apc_amount=row["apc_amount"],
-            waiver_policy=row["waiver_policy"],
-            review_process=row["review_process"],
-            review_weeks=row["review_weeks"],
-            license=row["license"],
-            article_count=row["article_count"],
-            source=row["source"],
+            id=row["id"],
+            title=clean(row["title"]),
+            publisher=clean(row["publisher"]),
+            country=clean(row["country"]),
+            website=clean(row["website"]),
+            doaj_url=clean(row["doaj_url"]),
+            issn_print=clean(row["issn_print"]),
+            issn_online=clean(row["issn_online"]),
+            subjects=clean(row["subjects"]),
+            keywords=clean(row["keywords"]),
+            languages=clean(row["languages"]),
+            apc=clean(row["apc"]),
+            apc_amount=clean(row["apc_amount"]),
+            waiver_policy=clean(row["waiver_policy"]),
+            review_process=clean(row["review_process"]),
+            review_weeks=clean(row["review_weeks"]),
+            license=clean(row["license"]),
+            article_count=clean(row["article_count"]),
+            source=clean(row["source"]),
+            source_details=source_details,
         )

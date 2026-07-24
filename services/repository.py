@@ -17,15 +17,63 @@ def get_connection():
     return sqlite3.connect(DB_PATH)
 
 
-def _rows_to_journals(dataframe):
+def _fetch_sources(conn, journal_ids):
     """
-    Convert a pandas DataFrame into Journal objects.
+    Batch-fetch confirmed indexing sources for a set of journal ids,
+    with any per-source metadata (Scopus/WoS quartile, SJR, H-index;
+    SINTA accreditation). Returns {journal_id: [detail_dict, ...]}.
     """
 
-    return [
-        Journal.from_row(row)
+    journal_ids = list(journal_ids)
+
+    if not journal_ids:
+        return {}
+
+    placeholders = ",".join("?" for _ in journal_ids)
+
+    rows = conn.execute(
+        f"SELECT journal_id, source, quartile, sjr, h_index, accreditation "
+        f"FROM journal_sources WHERE journal_id IN ({placeholders})",
+        journal_ids,
+    ).fetchall()
+
+    details_by_id = {}
+    for journal_id, source, quartile, sjr, h_index, accreditation in rows:
+        details_by_id.setdefault(journal_id, []).append({
+            "source": source,
+            "quartile": quartile,
+            "sjr": sjr,
+            "h_index": h_index,
+            "accreditation": accreditation,
+        })
+
+    return details_by_id
+
+
+def _rows_to_journals(dataframe, conn=None):
+    """
+    Convert a pandas DataFrame into Journal objects, attaching each
+    journal's confirmed indexing sources from journal_sources.
+    """
+
+    if dataframe.empty:
+        return []
+
+    owns_connection = conn is None
+    if owns_connection:
+        conn = get_connection()
+
+    sources_by_id = _fetch_sources(conn, dataframe["id"].tolist())
+
+    journals = [
+        Journal.from_row(row, source_details=sources_by_id.get(row["id"], []))
         for _, row in dataframe.iterrows()
     ]
+
+    if owns_connection:
+        conn.close()
+
+    return journals
 
 
 def get_all_journals():
@@ -40,9 +88,11 @@ def get_all_journals():
 
     dataframe = pd.read_sql_query(query, conn)
 
+    result = _rows_to_journals(dataframe, conn=conn)
+
     conn.close()
 
-    return _rows_to_journals(dataframe)
+    return result
 
 
 def search_by_title(title):
@@ -62,9 +112,11 @@ def search_by_title(title):
         params=[f"%{title}%"]
     )
 
+    result = _rows_to_journals(dataframe, conn=conn)
+
     conn.close()
 
-    return _rows_to_journals(dataframe)
+    return result
 
 
 def search_journals(**filters):
@@ -90,9 +142,11 @@ def search_journals(**filters):
         params=params
     )
 
+    result = _rows_to_journals(dataframe, conn=conn)
+
     conn.close()
 
-    return _rows_to_journals(dataframe)
+    return result
 
 
 def search_by_keywords(keywords):
@@ -143,15 +197,18 @@ def search_by_keywords(keywords):
         params=params,
     )
 
+    result = _rows_to_journals(dataframe, conn=conn)
+
     conn.close()
 
-    return _rows_to_journals(dataframe)
+    return result
 
 
-def search_candidates(keywords, language=None, free_only=False):
+def search_candidates(keywords, language=None, free_only=False, indexing=None):
     """
     Search journals matching any keyword in the title, subjects, or
-    keywords fields, optionally narrowed by language and/or free-only.
+    keywords fields, optionally narrowed by language, free-only, and/or
+    confirmed indexing source(s).
 
     language:
         Substring match against the `languages` column
@@ -159,6 +216,12 @@ def search_candidates(keywords, language=None, free_only=False):
 
     free_only:
         If True, only return journals with no publication fee (apc = "No").
+
+    indexing:
+        Optional list of source names (e.g. ["DOAJ", "Scopus"]). If given,
+        only journals confirmed in at least one of these sources (via
+        journal_sources) are returned. Sources with no imported data
+        simply won't match anything yet — this does not fabricate matches.
 
     Note: budget (max APC) filtering is NOT done here. The `apc_amount`
     column is free text (e.g. "40 USD", "40 USD; 450000 IDR") rather than
@@ -194,6 +257,13 @@ def search_candidates(keywords, language=None, free_only=False):
     if free_only:
         conditions.append("apc = 'No'")
 
+    if indexing:
+        placeholders = ",".join("?" for _ in indexing)
+        conditions.append(
+            f"id IN (SELECT journal_id FROM journal_sources WHERE source IN ({placeholders}))"
+        )
+        params.extend(indexing)
+
     query = "SELECT DISTINCT * FROM journals"
 
     if conditions:
@@ -201,9 +271,11 @@ def search_candidates(keywords, language=None, free_only=False):
 
     dataframe = pd.read_sql_query(query, conn, params=params)
 
+    result = _rows_to_journals(dataframe, conn=conn)
+
     conn.close()
 
-    return _rows_to_journals(dataframe)
+    return result
 
 
 def count_journals():
@@ -229,19 +301,100 @@ def count_journals():
     return count
 
 
+def insert_minimal_journal(conn, title, publisher=None, country=None, website=None,
+                            issn_print=None, issn_online=None, source=None):
+    """
+    Create a new journal row from a non-DOAJ source (Scopus/WoS/SINTA)
+    when no existing journal matches it. Used by the import pipeline —
+    takes an already-open connection so callers can batch many inserts
+    in one transaction.
+    """
+
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO journals (title, publisher, country, website,
+                               issn_print, issn_online, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (title, publisher, country, website, issn_print, issn_online, source),
+    )
+
+    return cursor.lastrowid
+
+
+def tag_source(conn, journal_id, source, metadata=None):
+    """
+    Confirm a journal in a given source, with any source-specific
+    metadata (quartile/sjr/h_index for Scopus/WoS, accreditation for
+    SINTA). Upserts: re-running an import updates the metadata for an
+    already-tagged journal rather than duplicating the row.
+    """
+
+    metadata = metadata or {}
+
+    conn.execute(
+        """
+        INSERT INTO journal_sources (journal_id, source, quartile, sjr, h_index, accreditation)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(journal_id, source) DO UPDATE SET
+            quartile = excluded.quartile,
+            sjr = excluded.sjr,
+            h_index = excluded.h_index,
+            accreditation = excluded.accreditation
+        """,
+        (
+            journal_id,
+            source,
+            metadata.get("quartile"),
+            metadata.get("sjr"),
+            metadata.get("h_index"),
+            metadata.get("accreditation"),
+        ),
+    )
+
+
 def insert_journals(journals):
-    """Insert Journal objects into the database."""
+    """
+    Insert Journal objects into the database, along with their confirmed
+    indexing sources into journal_sources.
+    """
 
     conn = get_connection()
+    cursor = conn.cursor()
 
-    rows = [asdict(journal) for journal in journals]
+    journal_columns = [
+        column.name
+        for column in Journal.__dataclass_fields__.values()
+        if column.name not in ("id", "source_details")
+    ]
 
-    pd.DataFrame(rows).to_sql(
-        "journals",
-        conn,
-        if_exists="append",
-        index=False,
-    )
+    placeholders = ", ".join("?" for _ in journal_columns)
+    columns_sql = ", ".join(journal_columns)
+
+    for journal in journals:
+
+        row = asdict(journal)
+        values = [row[column] for column in journal_columns]
+
+        cursor.execute(
+            f"INSERT INTO journals ({columns_sql}) VALUES ({placeholders})",
+            values,
+        )
+
+        journal_id = cursor.lastrowid
+
+        # A journal's confirmed sources are its `sources` list if set,
+        # otherwise its single `source` value (backward compatible with
+        # importers that haven't been updated to set `sources`).
+        sources = journal.sources or ([journal.source] if journal.source else [])
+
+        for source in sources:
+            cursor.execute(
+                "INSERT OR IGNORE INTO journal_sources (journal_id, source) VALUES (?, ?)",
+                (journal_id, source),
+            )
 
     conn.commit()
     conn.close()

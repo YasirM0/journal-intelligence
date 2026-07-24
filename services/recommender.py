@@ -3,13 +3,17 @@ import re
 from services.repository import search_candidates
 
 # Strategies we can actually support with the data currently in the
-# database (title/subjects/keywords text, apc + apc_amount, review_weeks).
-#
-# "Best Match" (semantic similarity), "Highest Prestige" (needs a quartile
-# or ranking source) and "Beginner Friendly" (needs acceptance rate) are
-# in the long-term vision but there's no underlying data for them yet, so
-# they are intentionally left out rather than faked with a made-up score.
-STRATEGIES = ["Balanced", "Lowest APC", "Fast Publication"]
+# database. "Highest Prestige" now has real data behind it (Scopus/WoS
+# quartile + SJR via SCImago) so it's included for real, not faked.
+# "Best Match" (semantic similarity) and "Beginner Friendly" (needs an
+# acceptance rate) still don't have underlying data, so they're left out
+# entirely rather than faked with a made-up score.
+STRATEGIES = ["Balanced", "Lowest APC", "Highest Prestige"]
+
+_QUARTILE_RANK = {"Q1": 4, "Q2": 3, "Q3": 2, "Q4": 1}
+
+# Ordered worst -> best. Used for confidence bucketing below.
+CONFIDENCE_LEVELS = ["Poor", "Weak", "Moderate", "Strong", "Excellent"]
 
 # apc_amount is free text like "40 USD" or "40 USD; 450000 IDR", not a
 # clean number. We only trust a figure we can find explicitly in USD;
@@ -41,18 +45,22 @@ class JournalRecommender:
         free_only=False,
         min_budget=None,
         max_budget=None,
+        indexing=None,
         strategy="Balanced",
-        limit=20,
     ):
         """
         Recommend journals based on a paper title, keywords, and
-        (optionally) an abstract, narrowed by language/budget filters
-        and reordered according to a recommendation strategy.
+        (optionally) an abstract, narrowed by language/budget/indexing
+        filters and reordered according to a recommendation strategy.
+
+        Returns the FULL sorted list of matching journals (searches and
+        scores the complete candidate set rather than an early-truncated
+        sample), each tagged with a relative confidence level. Pagination
+        over that list is the caller's responsibility (e.g. the UI).
         """
 
         keywords = keywords or []
 
-        # Clean keywords
         keywords = [
             keyword.strip()
             for keyword in keywords
@@ -76,12 +84,13 @@ class JournalRecommender:
                     keywords.append(word)
             keywords = keywords[:15]
 
-        # Only push free_only to SQL (apc is clean 'Yes'/'No' text).
+        # Only push free_only/indexing to SQL (both are clean columns).
         # Budget filtering happens below, in Python, after parsing.
         candidates = search_candidates(
             keywords,
             language=language,
             free_only=free_only,
+            indexing=indexing,
         )
 
         recommendations = []
@@ -98,7 +107,7 @@ class JournalRecommender:
             # excluded rather than guessed at.
             if not free_only and (min_budget is not None or max_budget is not None):
                 if is_free:
-                    if min_budget:  # a floor above $0 rules out free journals
+                    if min_budget:
                         continue
                 else:
                     if usd_amount is None:
@@ -146,19 +155,25 @@ class JournalRecommender:
                 "country": journal.country or "",
                 "website": journal.website or "",
                 "doaj_url": journal.doaj_url or "",
+                "issn_print": journal.issn_print or "",
+                "issn_online": journal.issn_online or "",
+                "subjects": journal.subjects or "",
                 "languages": journal.languages or "",
                 "license": journal.license or "",
                 "apc": journal.apc or "",
                 "apc_amount": usd_amount,
                 "is_free": is_free,
                 "review_weeks": journal.review_weeks,
+                "sources": journal.sources,
+                "source_details": journal.source_details,
                 "score": score,
                 "reasons": reasons,
             })
 
         recommendations = self._apply_strategy(recommendations, strategy)
+        self._assign_confidence(recommendations)
 
-        return recommendations[:limit]
+        return recommendations
 
     def _apply_strategy(self, recommendations, strategy):
         """
@@ -176,13 +191,19 @@ class JournalRecommender:
             )
             return recommendations
 
-        if strategy == "Fast Publication":
-            recommendations.sort(
-                key=lambda r: (
-                    r["review_weeks"] if r["review_weeks"] is not None else float("inf"),
-                    -r["score"],
-                )
-            )
+        if strategy == "Highest Prestige":
+            def prestige_key(r):
+                best_quartile_rank = 0
+                best_sjr = 0.0
+                for detail in r.get("source_details", []):
+                    q_rank = _QUARTILE_RANK.get(detail.get("quartile"), 0)
+                    if q_rank > best_quartile_rank:
+                        best_quartile_rank = q_rank
+                    if detail.get("sjr") and detail["sjr"] > best_sjr:
+                        best_sjr = detail["sjr"]
+                return (best_quartile_rank, best_sjr, r["score"])
+
+            recommendations.sort(key=prestige_key, reverse=True)
             return recommendations
 
         # Balanced (default): topical match first, small nudge for free access
@@ -191,3 +212,28 @@ class JournalRecommender:
             reverse=True,
         )
         return recommendations
+
+    def _assign_confidence(self, recommendations):
+        """
+        Label each recommendation with a confidence level, relative to
+        the other matches found for THIS search.
+
+        This is a rank-based heuristic (which fifth of this search's own
+        results a journal falls into), not a statistically validated
+        probability of fit or acceptance — there's no outcome data behind
+        it. It's here to help scanning, not as a claim about your odds
+        with any individual journal.
+        """
+
+        n = len(recommendations)
+
+        for position, recommendation in enumerate(recommendations):
+            # position 0 is the best match
+            percentile_from_top = position / n if n else 0
+            bucket_index = min(
+                int(percentile_from_top * len(CONFIDENCE_LEVELS)),
+                len(CONFIDENCE_LEVELS) - 1,
+            )
+            # bucket_index 0 = top fifth -> should map to "Excellent" (last in list)
+            level = CONFIDENCE_LEVELS[len(CONFIDENCE_LEVELS) - 1 - bucket_index]
+            recommendation["confidence"] = level

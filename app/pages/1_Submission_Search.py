@@ -1,27 +1,103 @@
+import math
+
 import streamlit as st
 
-from services.recommender import JournalRecommender, STRATEGIES
-from services.export import export_to_csv
+from datetime import datetime
+
+from services import search_service
+from services.recommender import STRATEGIES
+from services.repository import DB_PATH
+
+if "search" not in st.session_state:
+    st.session_state.search = None
+
+if "page" not in st.session_state:
+    st.session_state.page = 1
+
+if "show_weaker" not in st.session_state:
+    st.session_state.show_weaker = False
+
+PAGE_SIZE = 10
+
+CONFIDENCE_COLORS = {
+    "Excellent": "green",
+    "Strong": "blue",
+    "Moderate": "yellow",
+    "Weak": "orange",
+    "Poor": "gray",
+}
+
+CONFIDENCE_STARS = {
+    "Excellent": "★★★★★",
+    "Strong": "★★★★☆",
+    "Moderate": "★★★☆☆",
+    "Weak": "★★☆☆☆",
+    "Poor": "★☆☆☆☆",
+}
+
+# By default only the top two confidence tiers are shown.
+STRONG_TIERS = {"Excellent", "Strong"}
+
+
+def format_source_label(detail):
+    """e.g. 'Scopus (Q1)', 'SINTA 2', or plain 'DOAJ'."""
+    source = detail["source"]
+    if source == "SINTA" and detail.get("accreditation"):
+        return detail["accreditation"]
+    if detail.get("quartile"):
+        return f"{source} ({detail['quartile']})"
+    return source
+
+
+@st.cache_data(show_spinner=False)
+def cached_search(title, keywords_tuple, abstract, language, free_only,
+                   min_budget, max_budget, indexing_tuple, strategy, _db_mtime):
+    """
+    Cached wrapper around the (Streamlit-free) search service. `_db_mtime`
+    is included purely so the cache key changes automatically whenever
+    data/journal_intelligence.db is rebuilt (e.g. after re-running
+    scripts/build_database.py) — Streamlit's cache otherwise has no way
+    to know the underlying data changed.
+    """
+    return search_service.search_journals(
+        title=title,
+        keywords=list(keywords_tuple),
+        abstract=abstract,
+        language=language,
+        free_only=free_only,
+        min_budget=min_budget,
+        max_budget=max_budget,
+        indexing=list(indexing_tuple) if indexing_tuple else None,
+        strategy=strategy,
+    )
+
+
+# ==========================================================
+# Page Configuration
+# ==========================================================
 
 st.set_page_config(
     page_title="Submission Search",
     page_icon="🔍",
 )
 
-st.title("🔍 Submission Search")
+st.title("🔍 Journal Search")
 
 st.write(
-    "Enter your manuscript information to receive journal recommendations."
+    "Upload your completed manuscript or enter its information manually "
+    "to discover journals that best match your research."
 )
+
+st.divider()
 
 # ==========================================================
 # Upload Manuscript
 # ==========================================================
 
-with st.expander("📄 Upload manuscript (optional)"):
+with st.expander("📎 Upload manuscript (optional)"):
 
     uploaded_file = st.file_uploader(
-        "Upload a PDF or DOCX file",
+        "Upload PDF or DOCX",
         type=["pdf", "docx"],
     )
 
@@ -32,22 +108,34 @@ with st.expander("📄 Upload manuscript (optional)"):
             "manually for now."
         )
 
+    st.caption(
+        "🚧 Automatic manuscript extraction will be available in a future version."
+    )
+
+st.divider()
+
 # ==========================================================
-# Manual Entry
+# Manual Manuscript Entry
 # ==========================================================
 
+st.subheader("📄 Enter Manuscript Information")
+
 title = st.text_input(
-    "Paper Title",
+    "Paper Title *",
+    placeholder="Enter your manuscript title...",
 )
 
 abstract = st.text_area(
-    "Abstract",
-    height=200,
+    "Abstract *",
+    placeholder="Paste your manuscript abstract here...",
+    height=220,
+    help="Your abstract helps identify suitable journals when keywords are left blank.",
 )
 
 keywords = st.text_input(
-    "Keywords (comma separated)",
+    "Keywords (Optional)",
     placeholder="digital governance, e-government, Indonesia",
+    help="Separate keywords using commas (,) or semicolons (;).",
 )
 
 st.divider()
@@ -56,162 +144,315 @@ st.divider()
 # Publication Preferences
 # ==========================================================
 
-st.subheader("Publication Preferences")
+st.caption(
+    "Customize how Journal Intelligence recommends journals for your manuscript."
+)
 
-pref_col1, pref_col2, pref_col3 = st.columns(3)
+# All three strategies here are backed by real data: Balanced (keyword
+# match), Lowest APC (apc/apc_amount), and Highest Prestige (Scopus/WoS
+# quartile + SJR via SCImago).
+STRATEGY_LABELS = {
+    "⚖️ Balanced (Recommended)": "Balanced",
+    "💰 Lowest APC": "Lowest APC",
+    "🏆 Highest Prestige": "Highest Prestige",
+}
 
-with pref_col1:
-    # Real strategies first, plus roadmap items shown but marked "Coming soon"
-    # rather than silently faked with made-up scores.
-    strategy_options = STRATEGIES + [
-        "Best Match (Coming soon)",
-        "Highest Prestige (Coming soon)",
-        "Beginner Friendly (Coming soon)",
-    ]
-    strategy = st.selectbox(
+# DOAJ, Scopus, Web of Science, and SINTA are all real, imported
+# collections (see scripts/build_database.py). Google Scholar isn't a
+# curated list Journal Intelligence can import (no bulk export exists),
+# so it's not offered as a filter.
+INDEXING_OPTIONS = ["DOAJ", "Scopus", "SINTA", "Web of Science"]
+
+with st.expander("⚙️ Publication Preferences", expanded=False):
+
+    strategy_label = st.selectbox(
         "Recommendation Strategy",
-        strategy_options,
-        index=0,
-        help=(
-            "Best Match, Highest Prestige, and Beginner Friendly need data "
-            "(semantic similarity, journal rank, acceptance rate) that "
-            "isn't in the database yet."
-        ),
+        list(STRATEGY_LABELS.keys()),
+        help="Choose what Journal Intelligence should prioritize when ranking journals.",
     )
 
-with pref_col2:
-    language_choice = st.selectbox(
-        "Preferred Language",
-        ["Any", "English", "Indonesian"],
-        index=0,
-    )
+    st.divider()
 
-with pref_col3:
+    st.markdown("#### Filters")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        preferred_indexing = st.multiselect(
+            "Preferred Indexing",
+            INDEXING_OPTIONS,
+            default=["DOAJ"],
+            help="Only journals confirmed in at least one selected source are shown.",
+        )
+
+    with col2:
+        preferred_language = st.selectbox(
+            "Preferred Language",
+            ["Any", "English", "Indonesian"],
+        )
+
     budget_choice = st.selectbox(
         "Publication Budget",
-        ["Any", "Free", "<$100", "$100–300", ">$300"],
-        index=0,
-    )
-
-with st.expander("ℹ️ About these filters"):
-    st.caption(
-        "Language filtering uses each journal's listed languages. "
-        "Budget filtering uses each journal's listed APC — where a fee "
-        "applies but no USD figure could be confirmed, that journal is "
-        "left out of budget-limited searches rather than guessed at. "
-        "Indexing filters (Scopus, SINTA, Web of Science) aren't available "
-        "yet — this database is sourced from DOAJ, so all listed journals "
-        "are DOAJ-indexed by definition, but other indexes aren't tracked."
+        [
+            "Any",
+            "Free (No APC)",
+            "Low APC (< $100)",
+            "Medium APC ($100–300)",
+            "High APC (> $300)",
+        ],
+        help="Maximum publication fee you are willing to pay.",
     )
 
 st.divider()
 
 # ==========================================================
-# Search
+# Journal Recommendation
 # ==========================================================
 
 if st.button(
-    "🔍 Find Journals",
-    use_container_width=True,
+    "🔍 Find Best Matching Journals",
+    width="stretch",
 ):
 
-    if not title:
-        st.warning("Please enter a paper title.")
+    if not title or not abstract:
+        st.warning("Please enter both a title and an abstract.")
         st.stop()
 
-    keyword_list = [
+    keyword_list = tuple(
         k.strip()
         for k in keywords.replace(";", ",").split(",")
         if k.strip()
-    ]
-
-    language = None if language_choice == "Any" else language_choice
-
-    free_only = budget_choice == "Free"
-    min_budget = None
-    max_budget = None
-    if budget_choice == "<$100":
-        max_budget = 99.99
-    elif budget_choice == "$100–300":
-        min_budget, max_budget = 100, 300
-    elif budget_choice == ">$300":
-        min_budget = 300
-
-    resolved_strategy = strategy if strategy in STRATEGIES else "Balanced"
-    if strategy not in STRATEGIES:
-        st.info(f'"{strategy.split(" (")[0]}" isn\'t available yet — showing Balanced results instead.')
-
-    recommender = JournalRecommender()
-
-    results = recommender.recommend(
-        title=title,
-        keywords=keyword_list,
-        abstract=abstract,
-        language=language,
-        free_only=free_only,
-        min_budget=min_budget,
-        max_budget=max_budget,
-        strategy=resolved_strategy,
     )
 
-    st.session_state.results = results
+    language = None if preferred_language == "Any" else preferred_language
 
+    free_only = budget_choice == "Free (No APC)"
+    min_budget = None
+    max_budget = None
+    if budget_choice == "Low APC (< $100)":
+        max_budget = 99.99
+    elif budget_choice == "Medium APC ($100–300)":
+        min_budget, max_budget = 100, 300
+    elif budget_choice == "High APC (> $300)":
+        min_budget = 300
+
+    resolved_strategy = STRATEGY_LABELS[strategy_label]
+
+    db_mtime = DB_PATH.stat().st_mtime if DB_PATH.exists() else 0
+
+    results = cached_search(
+        title,
+        keyword_list,
+        abstract,
+        language,
+        free_only,
+        min_budget,
+        max_budget,
+        tuple(preferred_indexing) if preferred_indexing else None,
+        resolved_strategy,
+        db_mtime,
+    )
+
+    st.session_state.search = {
+        "results": results,
+        "strategy_label": strategy_label,
+    }
+    st.session_state.page = 1
+    st.session_state.show_weaker = False
+
+    if not results:
+        st.info(
+            """
+### No journals matched your current filters.
+
+Try one or more of the following:
+
+- Choose **Any** as the preferred language.
+- Choose **Any** as the publication budget.
+- Select **DOAJ** (or clear indexing filters) — it has the broadest coverage.
+- Broaden your manuscript title, abstract, or keywords.
+"""
+        )
+        st.stop()
 
 # ==========================================================
 # Recommendation Results
 # ==========================================================
 
-if "results" in st.session_state:
+search = st.session_state.search
 
-    results = st.session_state.results
+if search:
 
-    st.success(f"Found {len(results)} journal recommendations.")
+    all_results = search["results"]
+    strategy_label = search["strategy_label"]
 
-    if results:
-        csv_bytes = export_to_csv(results)
-        st.download_button(
-            "⬇️ Export as CSV",
-            data=csv_bytes,
-            file_name="journal_recommendations.csv",
-            mime="text/csv",
-            use_container_width=True,
+    st.session_state.show_weaker = st.checkbox(
+        "Show weaker matches too (Moderate / Weak / Poor)",
+        value=st.session_state.show_weaker,
+        help=(
+            "Confidence is relative to this search's own results, not a "
+            "validated prediction — it just ranks matches into fifths so "
+            "the strongest ones are easy to spot."
+        ),
+    )
+
+    if st.session_state.show_weaker:
+        visible_results = all_results
+    else:
+        visible_results = [r for r in all_results if r["confidence"] in STRONG_TIERS]
+
+    hidden_count = len(all_results) - len(visible_results)
+
+    top_col1, top_col2 = st.columns([3, 1])
+
+    with top_col1:
+        st.success(f"Showing {len(visible_results)} of {len(all_results)} recommended journals.")
+        if hidden_count and not st.session_state.show_weaker:
+            st.caption(f"{hidden_count} weaker matches hidden — tick the box above to see them.")
+
+    with top_col2:
+        if st.button("🗑️ Clear Search"):
+            st.session_state.search = None
+            st.rerun()
+
+    if visible_results:
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+        strategy_slug = (
+            strategy_label
+            .split(" ", 1)[1]
+            .replace(" (Recommended)", "")
+            .replace(" ", "_")
+            .lower()
         )
 
-    for journal in results:
+        filename = f"ji_{strategy_slug}_{timestamp}.csv"
+
+        csv_data = search_service.export_results_csv(visible_results)
+        st.download_button(
+            label="📥 Download Recommendations (CSV)",
+            data=csv_data,
+            file_name=filename,
+            mime="text/csv",
+        )
+
+    st.caption(
+        "🔒 Search results are stored only for this browser session "
+        "and are never saved permanently."
+    )
+    st.caption(
+        "Data: Directory of Open Access Journals (doaj.org) · "
+        "SCImago Journal & Country Rank (scimagojr.com) · "
+        "SINTA (sinta.kemdikbud.go.id)"
+    )
+
+    # ------------------------------------------------------
+    # Pagination
+    # ------------------------------------------------------
+
+    total_pages = max(1, math.ceil(len(visible_results) / PAGE_SIZE))
+    st.session_state.page = min(st.session_state.page, total_pages)
+
+    page_col1, page_col2, page_col3 = st.columns([1, 2, 1])
+
+    with page_col1:
+        if st.button("⬅️ Previous", disabled=st.session_state.page <= 1):
+            st.session_state.page -= 1
+            st.rerun()
+
+    with page_col2:
+        st.markdown(
+            f"<div style='text-align:center;'>Page {st.session_state.page} of {total_pages}</div>",
+            unsafe_allow_html=True,
+        )
+
+    with page_col3:
+        if st.button("Next ➡️", disabled=st.session_state.page >= total_pages):
+            st.session_state.page += 1
+            st.rerun()
+
+    start = (st.session_state.page - 1) * PAGE_SIZE
+    page_results = visible_results[start:start + PAGE_SIZE]
+
+    # ------------------------------------------------------
+    # Compact recommendation cards
+    # ------------------------------------------------------
+
+    for journal in page_results:
 
         with st.container(border=True):
 
-            st.subheader(journal["title"])
+            card_col1, card_col2 = st.columns([3, 1])
 
-            info_col1, info_col2 = st.columns(2)
+            with card_col1:
+                st.markdown(f"**{journal['title']}**")
+                st.caption(
+                    f"{CONFIDENCE_STARS.get(journal['confidence'], '')} "
+                    f"{journal['confidence']} Match"
+                )
 
-            with info_col1:
-                st.write(f"**Publisher:** {journal['publisher']}")
-                st.write(f"**Country:** {journal['country']}")
-                st.write(f"**Language(s):** {journal['languages']}")
+            with card_col2:
+                st.badge(
+                    journal["confidence"],
+                    color=CONFIDENCE_COLORS.get(journal["confidence"], "gray"),
+                )
 
-            with info_col2:
+            st.write("**Indexed in:**")
+            if journal["source_details"]:
+                index_line = "  ".join(
+                    f"✓ {format_source_label(d)}" for d in journal["source_details"]
+                )
+                st.write(index_line)
+            else:
+                st.write("—")
+
+            summary_col1, summary_col2, summary_col3 = st.columns(3)
+
+            with summary_col1:
+                st.caption("Match Score")
+                st.write(journal["score"])
+
+            with summary_col2:
                 apc_label = "Free" if journal["is_free"] else (
                     f"~${journal['apc_amount']:.0f}"
                     if journal["apc_amount"] is not None
-                    else "Paid (amount not confirmed in USD)"
+                    else "Paid (unconfirmed)"
                 )
-                st.write(f"**APC:** {apc_label}")
+                st.caption("APC")
+                st.write(apc_label)
+
+            with summary_col3:
+                st.caption("Language")
+                st.write(journal["languages"] or "—")
+
+            with st.expander("Show more"):
+
+                st.write(f"**Publisher:** {journal['publisher'] or 'Not listed'}")
+                st.write(f"**Country:** {journal['country'] or 'Not listed'}")
                 st.write(f"**License:** {journal['license'] or 'Not listed'}")
+
                 if journal["review_weeks"] is not None:
                     st.write(f"**Typical review time:** ~{journal['review_weeks']} weeks")
 
-            st.write(f"**Score:** {journal['score']}")
+                if journal["subjects"]:
+                    st.write(f"**Subjects:** {journal['subjects']}")
 
-            if journal["website"]:
-                st.link_button(
-                    "Visit Journal",
-                    journal["website"],
-                )
+                if journal["issn_print"] or journal["issn_online"]:
+                    st.write(
+                        f"**ISSN:** {journal['issn_print'] or '—'} (print) / "
+                        f"{journal['issn_online'] or '—'} (online)"
+                    )
 
-            if journal["reasons"]:
+                if journal["reasons"]:
+                    st.write("**Why this journal?**")
+                    for reason in journal["reasons"]:
+                        st.write(f"- {reason}")
 
-                st.write("**Why this journal?**")
-
-                for reason in journal["reasons"]:
-                    st.write(f"- {reason}")
+                link_col1, link_col2 = st.columns(2)
+                with link_col1:
+                    if journal["website"]:
+                        st.link_button("Visit Journal", journal["website"])
+                with link_col2:
+                    if journal["doaj_url"]:
+                        st.link_button("View on DOAJ", journal["doaj_url"])

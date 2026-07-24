@@ -1,0 +1,102 @@
+"""
+Full database build pipeline.
+
+Rebuilds journal_intelligence.db from scratch using the CSV files in
+data/raw/:
+  - doaj.csv       -> base journal catalog (richest per-journal metadata)
+  - scimagojr.csv  -> tags matching journals as Scopus-indexed
+                       (+ quartile/SJR/H-index); creates new rows for
+                       Scopus-only journals not already in DOAJ
+  - wos.csv        -> SCImago's own export, pre-filtered by the user to
+                       Web-of-Science-indexed journals only; tags matches
+                       as Web-of-Science-indexed
+  - sinta.csv      -> tags matching journals as SINTA-indexed
+                       (+ accreditation); creates new rows for SINTA-only
+                       journals not already present
+
+To update any dataset: replace the matching file in data/raw/ with a
+newer export (same filename) and re-run this script. No code changes
+needed for a routine data refresh.
+
+Attribution (kept here and wherever this data is displayed in the app):
+  - DOAJ:        Directory of Open Access Journals (https://doaj.org)
+  - Scopus/WoS:  SCImago Journal & Country Rank (https://www.scimagojr.com)
+  - SINTA:       Indonesia's Science and Technology Index
+                 (https://sinta.kemdikbud.go.id)
+"""
+
+from pathlib import Path
+
+from importers.doaj import DOAJImporter
+from importers.scimago import import_scimago
+from importers.sinta import import_sinta
+from services.dedup import JournalIndex
+from services.repository import get_connection, count_journals, DB_PATH
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA_RAW = ROOT / "data" / "raw"
+SCHEMA_PATH = ROOT / "data" / "schema.sql"
+
+
+def init_schema():
+    conn = get_connection()
+    with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+        conn.executescript(f.read())
+    conn.commit()
+    conn.close()
+
+
+def main():
+
+    print(f"Building database at {DB_PATH}")
+    print()
+
+    init_schema()
+
+    print("--- DOAJ ---")
+    DOAJImporter(DATA_RAW / "doaj.csv").run()
+    doaj_count = count_journals()
+    print(f"DOAJ: {doaj_count} journals imported")
+    print()
+
+    conn = get_connection()
+    index = JournalIndex(conn)
+
+    print("--- Scopus (SCImago) ---")
+    index, scopus_summary = import_scimago(DATA_RAW / "scimagojr.csv", "Scopus", index=index, conn=conn)
+    conn.commit()
+    print()
+
+    print("--- Web of Science (SCImago, WoS-filtered) ---")
+    index, wos_summary = import_scimago(DATA_RAW / "wos.csv", "Web of Science", index=index, conn=conn)
+    conn.commit()
+    print()
+
+    print("--- SINTA ---")
+    index, sinta_summary = import_sinta(DATA_RAW / "sinta.csv", "SINTA", index=index, conn=conn)
+    conn.commit()
+    print()
+
+    conn.close()
+
+    total_journals = count_journals()
+
+    print("=" * 60)
+    print("Import summary")
+    print("=" * 60)
+    print(f"DOAJ imported:       {doaj_count} journals")
+    for label, summary in [("Scopus", scopus_summary), ("Web of Science", wos_summary), ("SINTA", sinta_summary)]:
+        matched = summary["matched_by_issn"] + summary["matched_by_title"]
+        print(f"{label:20} {summary['rows']} rows -> {matched} matched to existing journals, "
+              f"{summary['created']} new journals created")
+    print()
+    print(f"Total unique journals in database: {total_journals}")
+    print()
+    print("Validation warnings:")
+    for label, summary in [("Scopus", scopus_summary), ("Web of Science", wos_summary), ("SINTA", sinta_summary)]:
+        print(f"  {label}: {summary['missing_issn']} rows had no usable ISSN, "
+              f"{summary['matched_by_title']} matches were by title only (no ISSN overlap)")
+
+
+if __name__ == "__main__":
+    main()

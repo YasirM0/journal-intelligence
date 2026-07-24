@@ -1,160 +1,107 @@
-# Database Design
-
-## Purpose
-
-The Journal Database stores publicly available metadata about academic journals.
-
-It serves as the central data source for search, filtering, and ranking.
-
-The database intentionally stores factual information only.
-
-It does not contain ranking logic or recommendation algorithms.
-
----
-
-# Design Principles
-
-## Store Facts
-
-The database should store verifiable information rather than calculated scores.
-
-For example:
-
-✔ Publisher
-
-✔ Language
-
-✔ APC
-
-✔ Scope
-
-❌ Recommendation Score
-
-Scores are calculated by the Ranking Engine.
-
----
-
-## Public Information First
-
-Version 0.1 prioritizes information that can be obtained from public and reliable sources.
-
-If information is unavailable, it should remain empty rather than estimated.
-
----
-
-## Flexible Schema
-
-The schema should allow additional fields to be added in future versions without requiring major redesign.
-
----
-
-# Journal Record
-
-Each journal should contain the following information where available.
-
-## Basic Information
-
-- Journal Name
-- ISSN
-- eISSN
-- Publisher
-- Country
-- Website
-
----
-
-## Indexing
-
-- Scopus
-- SINTA
-- DOAJ
-- ESCI
-- Other indexes (future)
-
----
-
-## Classification
-
-- Subject Area
-- Discipline
-- Quartile
-- SINTA Rank
-
----
-
-## Publishing Information
-
-- Publication Language
-- Open Access
-- APC
-- Publication Frequency
-
----
-
-## Scope
-
-- Aims & Scope
-- Journal Description
-- Keywords
-
----
-
-## Search Data
-
-Fields used internally for semantic search.
-
-Examples:
-
-- Embeddings
-- Search Index IDs
-
-These fields are implementation details and are not displayed to users.
-
----
-
-# Missing Data
-
-Not every journal publishes the same information.
-
-The system should distinguish between:
-
-- Available
-- Not Available
-- Unknown
-
-The project should never invent missing values.
-
----
-
-# Future Extensions
-
-Possible future additions include:
-
-- First Decision Time
-- Publication Time
-- Fast Track Availability
-- Historical Quartiles
-- Community Statistics
-
-These fields are outside the scope of Version 0.1.
-
----
-
-# Version 0.1 Scope
-
-Version 0.1 stores only the metadata required for:
-
-- Search
-- Filtering
-- Ranking
-- Displaying journal information
-
-Additional fields will be introduced only when they support a concrete feature.
-
----
-
-**Document Version:** 0.1
-
-**Last Updated:** July 2026
-
-**Status:** Approved
+# Database: schema, import pipeline, and merge strategy
+
+## Schema
+
+**`journals`** — one row per real-world journal, regardless of how many
+indexes it appears in. Core metadata (title, publisher, country, ISSNs,
+subjects, APC, license, review time, ...) comes from whichever source
+had the richest data for that journal — in practice, DOAJ first, then
+Scopus/SINTA metadata is used to fill in journals DOAJ doesn't have.
+
+**`journal_sources`** — one row per (journal, source) pair. This is what
+makes the model source-agnostic: a journal with rows for `DOAJ`,
+`Scopus`, and `Web of Science` is still ONE row in `journals`, tagged
+three times here. Source-specific metadata that doesn't apply to every
+source lives here too (`quartile`, `sjr`, `h_index` for Scopus/WoS;
+`accreditation` for SINTA) and is simply NULL where it doesn't apply.
+
+Indexes exist on `issn_print`, `issn_online`, `title`, `country`
+(journals) and `journal_id`, `source` (journal_sources) for query speed.
+
+## Supported collections (v0.1.x)
+
+| Source | File | Role |
+|---|---|---|
+| DOAJ | `data/raw/doaj.csv` | Base catalog — richest per-journal metadata |
+| Scopus | `data/raw/scimagojr.csv` | Tags + quartile/SJR/H-index, via SCImago |
+| Web of Science | `data/raw/wos.csv` | Tags + quartile/SJR/H-index — the SAME SCImago format, pre-filtered by the maintainer to WoS-indexed journals only |
+| SINTA | `data/raw/sinta.csv` | Tags + accreditation tier (SINTA 1–6) |
+
+Not yet supported: Google Scholar (no bulk export exists to import from
+— there's nothing to build a real filter against), OpenAlex, Crossref,
+Sherpa Romeo. Adding a new source means writing one importer following
+the same pattern as `importers/scimago.py` or `importers/sinta.py`, not
+changing the schema.
+
+## Import pipeline
+
+Run `python3 scripts/build_database.py` from the project root. This is
+a **full rebuild**: it drops and recreates `journals` and
+`journal_sources`, then imports all four sources in order (DOAJ →
+Scopus → Web of Science → SINTA). To refresh any dataset, replace the
+matching file in `data/raw/` (same filename) and re-run the script —
+no code changes needed for a routine data update.
+
+## Deduplication / merge strategy
+
+For each incoming row (Scopus, WoS, SINTA):
+
+1. Try to match an existing journal by ISSN (print or online).
+2. If no ISSN match, try an **exact** normalized-title match (lowercased,
+   punctuation stripped, whitespace collapsed).
+3. If neither matches, a new `journals` row is created from that
+   source's own metadata, tagged only with that source.
+
+This is not fuzzy matching. Two records for the same journal with a
+meaningfully different title (e.g. one includes a subtitle the other
+doesn't, or a transliteration differs) will NOT be merged and will end
+up as two separate rows. `scripts/build_database.py` prints how many
+matches were made by ISSN vs. by title as a rough signal — a high
+title-only match count is worth spot-checking by hand.
+
+### What actually happened on the last real build
+
+From `data/raw/doaj.csv` (23,077), `scimagojr.csv` (32,193 Scopus
+rows), `wos.csv` (17,815 WoS rows — a subset of the Scopus file), and
+`sinta.csv` (15,453 rows):
+
+- DOAJ: 23,077 journals (base catalog)
+- Scopus: 9,194 matched an existing DOAJ journal; 22,999 had no DOAJ
+  match and became new journal rows (expected — DOAJ is open-access
+  only, Scopus is much broader)
+- Web of Science: all 17,815 rows matched something already in the
+  database (0 new) — expected, since this file is a subset of the
+  Scopus file already imported; this is a useful sanity check that the
+  matching logic is working
+- SINTA: 5,989 matched; 9,464 became new rows (mostly lower-tier
+  Indonesian journals not indexed elsewhere)
+- **Total: 55,540 unique journals**
+
+## Attribution
+
+- **DOAJ**: journal-level metadata (the CSV this project imports) is
+  released under a **CC0 waiver** — no attribution is legally required
+  — per DOAJ's own terms: https://www.doaj.org/terms/. Crediting it is
+  still good practice and is shown in the app regardless.
+- **Scopus / Web of Science data (via SCImago)**: SCImago's own site
+  states their data may be used for non-commercial purposes **as long
+  as it is cited**: "SCImago, (n.d.). SJR — SCImago Journal & Country
+  Rank [Portal]. Retrieved from https://www.scimagojr.com". This is a
+  real requirement, not a courtesy — keep the citation wherever this
+  data is shown or redistributed, and keep usage non-commercial.
+- **SINTA**: no official bulk-export terms exist; this dataset is a
+  maintainer-run scrape of https://sinta.kemdikbud.go.id/journals, not
+  an official SINTA download. Worth keeping in mind if this project (or
+  its database) is ever shared outside your own use.
+
+The Streamlit search page shows a data-source credit line at the bottom
+of every results view.
+
+## Architecture note
+
+`services/recommender.py` and `services/repository.py` do not import
+Streamlit and can be used from a script or another frontend.
+`services/search_service.py` is the intended entry point for any UI —
+Streamlit pages should call it instead of touching the recommender or
+repository directly. This is a first pass at that separation, scoped to
+what the search page needed; other pages haven't been touched yet.
